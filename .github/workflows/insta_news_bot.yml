@@ -1,0 +1,80 @@
+name: Instagram News Bot
+
+on:
+  schedule:
+    # Run every 2 hours from 6 AM to 11:30 PM IST (0:30 AM to 6 PM UTC)
+    - cron: '30 0,2,4,6,8,10,12,14,16,18 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip posting)'
+        required: false
+        default: 'false'
+      count:
+        description: 'Number of articles to post'
+        required: false
+        default: '1'
+
+jobs:
+  post-news:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      
+      - name: Install Python dependencies
+        run: |
+          cd insta
+          pip install -r requirements.txt
+      
+      - name: Create required directories
+        run: |
+          cd insta
+          mkdir -p assets/fonts
+          mkdir -p assets/music
+          mkdir -p output
+      
+      - name: Run bot
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          INSTAGRAM_USERNAME: ${{ secrets.INSTAGRAM_USERNAME }}
+          INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
+          INSTAGRAM_SESSION_B64: ${{ secrets.INSTAGRAM_SESSION_B64 }}
+          INSTA_WATERMARK: ${{ secrets.INSTA_WATERMARK }}
+          INSTA_POST_COUNT: ${{ github.event.inputs.count || '1' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          cd insta
+          python main.py
+      
+      - name: Upload artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-output-${{ github.run_number }}
+          path: |
+            output/
+            assets/posted_log.json
+          retention-days: 7
+      
+      - name: Commit posted log
+        if: success()
+        run: |
+          cd insta
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add assets/posted_log.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update posted log [skip ci]"
+          git push

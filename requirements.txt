@@ -1,0 +1,21 @@
+# RSS fetching
+feedparser==6.0.11
+
+# HTTP
+requests==2.31.0
+
+# Image handling (saving Gemini-generated images)
+Pillow==10.3.0
+
+# NumPy — must be <2 for moviepy 1.0.3 compatibility
+numpy<2
+
+# Video reel creation (image + music → MP4)
+moviepy==1.0.3
+
+# Instagram posting — personal/creator accounts (unofficial)
+instagrapi==2.1.2
+
+# All Gemini calls (text rewrite + image generation) go through OpenRouter
+# via plain requests — no extra SDK needed.
+# No fallback code - Gemini generates complete images with all text/graphics baked in.
