@@ -36,12 +36,10 @@ jobs:
       
       - name: Install Python dependencies
         run: |
-          cd Autoinsta
           pip install -r requirements.txt
       
       - name: Create required directories
         run: |
-          cd Autoinsta
           mkdir -p assets/fonts
           mkdir -p assets/music
           mkdir -p output
@@ -56,7 +54,6 @@ jobs:
           INSTA_POST_COUNT: ${{ github.event.inputs.count || '1' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: |
-          cd Autoinsta
           python main.py
       
       - name: Upload artifacts (on failure)
@@ -72,7 +69,6 @@ jobs:
       - name: Commit posted log
         if: success()
         run: |
-          cd Autoinsta
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add assets/posted_log.json
