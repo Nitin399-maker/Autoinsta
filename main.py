@@ -1,37 +1,3 @@
-"""
-Instagram News Bot — All-in-one main.py
-========================================
-Pipeline:
-  1. Fetch top viral news from RSS feeds (all categories)
-  2. Rewrite news content via Gemini 2.5 Pro (OpenRouter) → clean English + emojis
-  3. Generate a viral image via Gemini 2.0 Flash Preview Image Generation (OpenRouter)
-     with the headline overlaid at the bottom using Pillow
-  4. Add background music → create 15s MP4 reel (moviepy)
-  5. Build Instagram caption with emojis + hashtags
-  6. Post to Instagram (instagrapi or Meta Graph API)
-  7. Track posted articles to avoid duplicates
-
-Required env vars:
-  OPENROUTER_API_KEY       — OpenRouter API key (https://openrouter.ai)
-  INSTAGRAM_USERNAME       — Instagram handle  (for instagrapi)
-  INSTAGRAM_PASSWORD       — Instagram password (for instagrapi)
-  OR
-  INSTAGRAM_ACCESS_TOKEN   — Meta Graph API long-lived token
-  INSTAGRAM_ACCOUNT_ID     — Instagram Business Account ID
-
-Optional env vars:
-  INSTA_WATERMARK          — Watermark text on image  (default: @NewsFlash)
-  INSTA_POST_COUNT         — How many articles to post per run (default: 1)
-  DRY_RUN                  — Set to "true" to skip actual Instagram posting
-  IMGUR_CLIENT_ID          — Imgur API key (for Graph API media hosting)
-
-Usage:
-  python main.py               # Post top viral article
-  python main.py --dry-run     # Test without posting
-  python main.py --count 3     # Post top 3 articles
-"""
-
-# ─── Standard library ────────────────────────────────────────────────────────
 import os
 import sys
 import re
@@ -185,7 +151,7 @@ def fetch_news(max_articles=15):
                     continue
                 articles.append({
                     "title":     title,
-                    "summary":   summary[:1000],
+                    "summary":   summary,
                     "link":      entry.get("link", ""),
                     "source":    source,
                     "published": entry.get("published", entry.get("updated", "")),
@@ -230,30 +196,33 @@ def rewrite_news_content(article):
     watermark = WATERMARK
 
     prompt = f"""You are a viral social media news writer for Instagram. 
-Given this news article, produce a JSON response with exactly these 3 keys:
+Given this news article, produce a JSON response with exactly these 4 keys:
 
 1. "rewritten_summary": Rewrite the news in 3-5 sentences. Use clear, simple English that anyone can understand. Add relevant emojis naturally throughout. Make it engaging and easy to read.
 
-2. "caption": Write a full Instagram caption (max 2000 chars). Include:
+2. "viral_headline": Write ONE ultra-punchy, eye-catching headline (max 12 words) for this news story. It must:
+   - Use power words that trigger curiosity, urgency, or emotion (e.g. SHOCKING, MASSIVE, JUST IN, EXPOSED)
+   - Be written in TITLE CASE
+   - NOT use clickbait or misleading language — must reflect the actual story
+   - Be short enough to fit on 2 lines inside a news lower-third banner
+   - Feel like a live breaking-news ticker headline
+
+3. "caption": Write a full Instagram caption (max 2000 chars). Include:
    - An attention-grabbing opening line with emojis (e.g. BREAKING NEWS!)
    - The rewritten summary
    - A call-to-action (e.g. What do you think? Comment below!)
    - 12-15 relevant trending hashtags at the end
 
-3. "image_prompt": Write a detailed prompt for an AI image generator to create a complete, ready-to-post Instagram news image (1080x1080px square). Start the prompt with Generate and return an image. Then describe:
-   - Main photorealistic news scene with cinematic lighting, dark vignette, dramatic mood
-   - A semi-transparent dark bar at the bottom (last 300px) with thin red accent line at top
-   - The headline text in large bold white font (56pt) inside the bottom bar, wrapped to 2-3 lines. The headline is: {title}
-   - Source label with the source name in smaller gray text below headline. The source is: {source.upper()}
-   - Red BREAKING badge in top-left corner (white text on red rounded rectangle)
-   - Watermark in top-right corner (white bold text with black shadow). The watermark text is: {watermark}
-   - Professional news broadcast aesthetic, viral-worthy, Instagram-ready
-   End with: IMPORTANT You must generate and return the actual image file not just a description.
-   The image should be COMPLETE with all text and graphics included - no post-processing needed.
+4. "image_prompt": Write a detailed prompt for an AI image generator to create a complete, ready-to-post Instagram news image (1080x1080px square). Start the prompt with: Generate and return an image. Then describe every element precisely:
+   MAIN SCENE: Ultra-photorealistic, hyper-detailed news photograph representing the story. Shot with a 24mm lens at f/1.8, golden-hour or dramatic overcast lighting, shallow depth of field, natural motion blur on background elements. RAW photo quality — every texture, shadow, and highlight rendered at 8K resolution. Cinematic color grading (teal-orange LUT), dark vignette on all four edges. The scene must look indistinguishable from a real AFP/Reuters press photo. Use the full story context to choose the most visually dramatic scene: {summary}
+   BOTTOM BAR (pixels 780–1080, full width): Solid semi-transparent black overlay (85% opacity). A 4px-thick bright red horizontal line runs along the very top edge of this bar. Inside the bar: viral headline in large bold white sans-serif font (56pt), word-wrapped to 2–3 lines, left-aligned with 40px left margin. The viral headline text to render is the viral_headline you generated above. Directly below the headline: "📡 {source.upper()}" in light gray (30pt).
+   TOP-LEFT CORNER (anchored to 0,0): A bold red rounded-rectangle badge (padding 12px 24px, corner radius 8px) pinned flush to the top-left corner. Inside: white bold uppercase text "⚡ BREAKING NEWS" (32pt). Badge must have a 2px white inner border and a soft drop shadow.
+   TOP-RIGHT CORNER (anchored to top-right edge): White bold text watermark "{watermark}" (28pt) with a 2px black outline and subtle drop shadow, flush to the top-right corner with 16px margin from edges.
+   OVERALL STYLE: Ultra-realistic, 8K, zero artifacts, sharp foreground details, professional breaking-news broadcast aesthetic. The final image must look like a real live-news screenshot overlaid with native TV chyrons — completely Instagram-ready with no post-processing needed.
+   End with: IMPORTANT: You must generate and return the actual image file, not a description. All text badges and overlays must be rendered directly onto the image at the specified corners.
 
 News article:
 Title: {title}
-Summary: {summary}
 Source: {source}
 
 Respond with ONLY valid JSON, no markdown, no extra text."""
@@ -283,10 +252,17 @@ Respond with ONLY valid JSON, no markdown, no extra text."""
 
         data = json.loads(raw)
         print("[Gemini Text] Content rewritten successfully.")
+        viral_headline = data.get("viral_headline", title)
+        # If LLM left a literal placeholder in the image_prompt, replace it with the actual headline
+        raw_img_prompt = data.get("image_prompt", "")
+        if raw_img_prompt:
+            raw_img_prompt = raw_img_prompt.replace("viral_headline", viral_headline)
+        image_prompt = raw_img_prompt if raw_img_prompt else _default_image_prompt(article, viral_headline)
         return {
             "rewritten_summary": data.get("rewritten_summary", summary),
+            "viral_headline":    viral_headline,
             "caption":           data.get("caption", ""),
-            "image_prompt":      data.get("image_prompt", _default_image_prompt(article)),
+            "image_prompt":      image_prompt,
         }
     except Exception as e:
         print(f"[Gemini Text] API call failed: {e}")
@@ -296,25 +272,37 @@ Respond with ONLY valid JSON, no markdown, no extra text."""
 
 
 
-def _default_image_prompt(article):
+def _default_image_prompt(article, viral_headline=None):
     title = article["title"]
+    summary = article.get("summary", title)
     source = article.get("source", "NEWS")
     watermark = WATERMARK
+    headline_text = viral_headline if viral_headline else title
     return (
         f"Generate and return an image. Create a viral Instagram news post image (1080x1080px square format) with these elements:\n\n"
-        f"MAIN IMAGE: Photorealistic, dramatic news photograph representing: {title}. "
-        f"Cinematic lighting, high contrast, professional news photography style. "
-        f"Dark moody atmosphere with strong focal point. Apply dark vignette edges. "
-        f"Slightly darkened/desaturated for dramatic news effect.\n\n"
-        f"BOTTOM SECTION (last 300px): Semi-transparent dark overlay bar (black with 80% opacity) "
-        f"with a thin red accent line at the top edge. Inside this bar, display the headline text in "
-        f"large bold white font (56pt): \"{title}\". Wrap text to 2-3 lines if needed. "
-        f"Below the headline, show \"📡 {source.upper()}\" in smaller gray text (30pt).\n\n"
-        f"TOP LEFT CORNER: Red rounded rectangle badge with white bold text \"BREAKING\" (34pt).\n\n"
-        f"TOP RIGHT CORNER: White bold text watermark \"{watermark}\" (28pt) with subtle black shadow.\n\n"
-        f"STYLE: Ultra high quality, 4K, sharp details, professional news broadcast aesthetic, "
-        f"Instagram-ready, viral-worthy composition."
-        f"IMPORTANT: You must generate and return the actual image file, not just a description."
+        f"MAIN SCENE: Ultra-photorealistic, hyper-detailed news photograph. "
+        f"Use the full story context below to choose the single most visually dramatic, emotionally charged scene: {summary}. "
+        f"Shot with a 24mm lens at f/1.8, dramatic natural lighting (golden-hour or stormy overcast), "
+        f"shallow depth of field with razor-sharp subject and naturally blurred background. "
+        f"RAW photo quality at 8K resolution — every texture, skin pore, fabric fiber, and reflective surface rendered with absolute realism. "
+        f"Cinematic teal-orange color grade, deep shadows, bright highlights. Dark vignette on all four edges. "
+        f"The scene must be indistinguishable from a real AFP/Reuters wire photo.\n\n"
+        f"BOTTOM BAR (rows 780–1080, full width): Semi-transparent black overlay (85% opacity). "
+        f"A bold 4px bright-red horizontal line runs along the very top edge of this bar (full width). "
+        f"Inside the bar: white bold sans-serif viral headline text (56pt), word-wrapped to 2–3 lines, "
+        f"left-aligned with 40px left margin: \"{headline_text}\". "
+        f"Directly below: \"📡 {source.upper()}\" in light gray (30pt).\n\n"
+        f"TOP-LEFT CORNER (flush to 0,0 with 0px margin): Bold red rounded-rectangle badge "
+        f"(corner radius 8px, inner padding 12px 24px, 2px white inner border, soft drop shadow). "
+        f"Badge text: \"⚡ BREAKING NEWS\" in white bold uppercase (32pt). Must be pinned to the very top-left corner.\n\n"
+        f"TOP-RIGHT CORNER (flush to top-right edge, 16px margin): "
+        f"White bold watermark text \"{watermark}\" (28pt) with 2px black outline and drop shadow. "
+        f"Must be pinned to the very top-right corner.\n\n"
+        f"OVERALL STYLE: 8K ultra-realistic, zero compression artifacts, professional breaking-news broadcast aesthetic. "
+        f"Looks like a real live TV news screenshot with native chyrons burned into the frame. "
+        f"Instagram-ready, no post-processing needed.\n\n"
+        f"IMPORTANT: You must generate and return the actual image file, not a description. "
+        f"All text overlays and badges must be rendered directly onto the image at the exact specified corners."
     )
 
 
