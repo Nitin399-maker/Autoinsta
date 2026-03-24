@@ -68,38 +68,39 @@ IMG_HEIGHT = 1080
 # SECTION 1 — RSS FETCHING
 # ═════════════════════════════════════════════════════════════════════════════
 
+# Each entry is (category, url)
 RSS_FEEDS = [
     # World / International
-    "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://rss.cnn.com/rss/edition_world.rss",
-    "https://feeds.reuters.com/reuters/worldNews",
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    ("world",         "https://feeds.bbci.co.uk/news/world/rss.xml"),
+    ("world",         "https://rss.cnn.com/rss/edition_world.rss"),
+    ("world",         "https://feeds.reuters.com/reuters/worldNews"),
+    ("world",         "https://www.aljazeera.com/xml/rss/all.xml"),
+    ("world",         "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"),
     # India
-    "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
-    "https://www.thehindu.com/feeder/default.rss",
-    "https://indianexpress.com/feed/",
-    "https://www.ndtv.com/rss/top-stories",
+    ("india",         "https://timesofindia.indiatimes.com/rssfeedstopstories.cms"),
+    ("india",         "https://www.thehindu.com/feeder/default.rss"),
+    ("india",         "https://indianexpress.com/feed/"),
+    ("india",         "https://www.ndtv.com/rss/top-stories"),
     # Politics
-    "https://feeds.bbci.co.uk/news/politics/rss.xml",
-    "https://rss.cnn.com/rss/edition_politics.rss",
-    "https://feeds.reuters.com/Reuters/PoliticsNews",
+    ("politics",      "https://feeds.bbci.co.uk/news/politics/rss.xml"),
+    ("politics",      "https://rss.cnn.com/rss/edition_politics.rss"),
+    ("politics",      "https://feeds.reuters.com/Reuters/PoliticsNews"),
     # Technology
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://rss.cnn.com/rss/edition_technology.rss",
-    "https://feeds.feedburner.com/TechCrunch",
+    ("technology",    "https://feeds.bbci.co.uk/news/technology/rss.xml"),
+    ("technology",    "https://rss.cnn.com/rss/edition_technology.rss"),
+    ("technology",    "https://feeds.feedburner.com/TechCrunch"),
     # Science / Health
-    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-    "https://rss.cnn.com/rss/edition_health.rss",
-    # Entertainment / Viral
-    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
-    "https://rss.cnn.com/rss/edition_entertainment.rss",
+    ("science",       "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml"),
+    ("science",       "https://rss.cnn.com/rss/edition_health.rss"),
+    # Entertainment
+    ("entertainment", "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml"),
+    ("entertainment", "https://rss.cnn.com/rss/edition_entertainment.rss"),
     # Business
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.reuters.com/reuters/businessNews",
+    ("business",      "https://feeds.bbci.co.uk/news/business/rss.xml"),
+    ("business",      "https://feeds.reuters.com/reuters/businessNews"),
     # Sports
-    "https://feeds.bbci.co.uk/sport/rss.xml",
-    "https://rss.cnn.com/rss/edition_sport.rss",
+    ("sports",        "https://feeds.bbci.co.uk/sport/rss.xml"),
+    ("sports",        "https://rss.cnn.com/rss/edition_sport.rss"),
 ]
 
 # Broad viral keywords — covers all news types, not just conflict
@@ -138,9 +139,9 @@ def _score_virality(title, summary=""):
 
 
 def fetch_news(max_articles=15):
-    """Fetch and rank top viral articles from all RSS feeds."""
+    """Fetch articles from all RSS feeds, tagged by category, deduped by title."""
     articles = []
-    for feed_url in RSS_FEEDS:
+    for category, feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
             source = feed.feed.get("title", feed_url)
@@ -154,6 +155,7 @@ def fetch_news(max_articles=15):
                     "summary":   summary,
                     "link":      entry.get("link", ""),
                     "source":    source,
+                    "category":  category,
                     "published": entry.get("published", entry.get("updated", "")),
                     "score":     _score_virality(title, summary),
                 })
@@ -170,6 +172,33 @@ def fetch_news(max_articles=15):
             seen.append(key)
             unique.append(a)
     return unique[:max_articles]
+
+
+def pick_diverse_articles(articles, posted, count=3):
+    """
+    Pick `count` fresh articles from different categories.
+    Falls back to best-scoring fresh articles if not enough categories available.
+    """
+    fresh = [a for a in articles if _article_hash(a) not in posted]
+    # One best article per category (already sorted by score)
+    seen_cats, picked = set(), []
+    for a in fresh:
+        cat = a.get("category", "other")
+        if cat not in seen_cats:
+            seen_cats.add(cat)
+            picked.append(a)
+        if len(picked) == count:
+            break
+    # If we still need more (fewer categories than count), fill from remaining fresh
+    if len(picked) < count:
+        used_links = {a["link"] for a in picked}
+        for a in fresh:
+            if a["link"] not in used_links:
+                picked.append(a)
+                used_links.add(a["link"])
+            if len(picked) == count:
+                break
+    return picked
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -692,7 +721,7 @@ def process_article(article, dry_run=False):
     return post_to_instagram(media_path, caption)
 
 
-def run(count=1, dry_run=False, article_index=None):
+def run(count=3, dry_run=False, article_index=None):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f"\n{'#'*62}")
     print(f"  INSTA NEWS BOT  —  {ts}")
@@ -700,24 +729,30 @@ def run(count=1, dry_run=False, article_index=None):
     print(f"{'#'*62}\n")
 
     print("[Bot] Fetching news...")
-    articles = fetch_news(max_articles=20)
+    articles = fetch_news(max_articles=40)
     if not articles:
         print("[Bot] No articles fetched. Exiting.")
         return
 
     print(f"[Bot] {len(articles)} articles fetched (ranked by virality):")
     for i, a in enumerate(articles[:8]):
-        print(f"  [{i}] score={a['score']:2d}  {a['title'][:70]}")
+        print(f"  [{i}] score={a['score']:2d}  [{a.get('category','?'):12s}]  {a['title'][:60]}")
 
     posted = _load_log()
-    fresh  = [a for a in articles if _article_hash(a) not in posted]
-    print(f"\n[Bot] {len(fresh)} fresh articles (not yet posted).")
 
-    if not fresh:
-        print("[Bot] All top articles already posted today. Skipping.")
+    if article_index is not None:
+        fresh = [a for a in articles if _article_hash(a) not in posted]
+        to_post = [fresh[article_index]] if article_index < len(fresh) else []
+    else:
+        to_post = pick_diverse_articles(articles, posted, count=count)
+
+    print(f"\n[Bot] {len(to_post)} article(s) selected (diverse categories, no duplicates):")
+    for a in to_post:
+        print(f"  [{a.get('category','?'):12s}]  {a['title'][:65]}")
+
+    if not to_post:
+        print("[Bot] No fresh articles available. Skipping.")
         return
-
-    to_post = [fresh[article_index]] if (article_index is not None and article_index < len(fresh)) else fresh[:count]
 
     results = []
     for article in to_post:
@@ -725,7 +760,7 @@ def run(count=1, dry_run=False, article_index=None):
         if media_id:
             results.append(article)
             posted.add(_article_hash(article))
-            print(f"\n[Bot] ✓ Posted: {article['title'][:65]}")
+            print(f"\n[Bot] ✓ Posted: [{article.get('category','?')}] {article['title'][:60]}")
         else:
             print(f"\n[Bot] ✗ Failed: {article['title'][:65]}")
 

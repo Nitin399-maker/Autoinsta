@@ -2,8 +2,10 @@ name: Instagram News Bot
 
 on:
   schedule:
-    # Run every 2 hours from 6 AM to 11:30 PM IST (0:30 AM to 6 PM UTC)
-    - cron: '30 0,2,4,6,8,10,12,14,16,18 * * *'
+    # 9:00 AM IST = 03:30 UTC
+    - cron: '30 3 * * *'
+    # 6:00 PM IST = 12:30 UTC
+    - cron: '30 12 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -13,7 +15,7 @@ on:
       count:
         description: 'Number of articles to post'
         required: false
-        default: '1'
+        default: '3'
 
 jobs:
   post-news:
@@ -51,7 +53,7 @@ jobs:
           INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
           INSTAGRAM_SESSION_B64: ${{ secrets.INSTAGRAM_SESSION_B64 }}
           INSTA_WATERMARK: ${{ secrets.INSTA_WATERMARK }}
-          INSTA_POST_COUNT: ${{ github.event.inputs.count || '1' }}
+          INSTA_POST_COUNT: ${{ github.event.inputs.count || '3' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: |
           python main.py
