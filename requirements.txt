@@ -19,3 +19,6 @@ instagrapi==2.1.2
 # All Gemini calls (text rewrite + image generation) go through OpenRouter
 # via plain requests — no extra SDK needed.
 # No fallback code - Gemini generates complete images with all text/graphics baked in.
+
+# Trending keywords (Google Trends daily searches)
+pytrends==4.9.2

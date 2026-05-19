@@ -2,10 +2,18 @@ name: Instagram News Bot
 
 on:
   schedule:
-    # 9:00 AM IST = 03:30 UTC
-    - cron: '30 3 * * *'
-    # 6:00 PM IST = 12:30 UTC
-    - cron: '30 12 * * *'
+    # 5 posts per day, 9 AM – 9 PM IST (UTC+5:30 = UTC-5h30m)
+    # Alternating schedule:
+    #   ODD days (1,3,5...): politics, economy, world, sports, entertainment
+    #   EVEN days (2,4,6...): technology, health, environment, crime, lifestyle
+    # Each run posts the NEXT unposted-today category automatically.
+    # 0–15 min startup jitter (below) makes actual post times ~3 hrs ± random mins apart.
+    - cron: '30 3  * * *'   #  9:00 AM IST  — post 1
+    - cron: '30 6  * * *'   # 12:00 PM IST  — post 2 (3 hrs later)
+    - cron: '30 9  * * *'   #  3:00 PM IST  — post 3 (3 hrs later)
+    - cron: '30 12 * * *'   #  6:00 PM IST  — post 4 (3 hrs later)
+    - cron: '30 15 * * *'   #  9:00 PM IST  — post 5 (3 hrs later)
+
   workflow_dispatch:
     inputs:
       dry_run:
@@ -13,39 +21,45 @@ on:
         required: false
         default: 'false'
       count:
-        description: 'Number of articles to post'
+        description: 'Override: post N diverse articles (0 = next-category auto mode)'
         required: false
-        default: '3'
+        default: '0'
 
 jobs:
   post-news:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-      
+
       - name: Install Python dependencies
         run: |
           pip install -r requirements.txt
-      
+
       - name: Create required directories
         run: |
           mkdir -p assets/fonts
           mkdir -p assets/music
           mkdir -p output
-      
+
+      - name: Random startup jitter (adds ±random minutes to each post)
+        run: |
+          # Sleep 0–15 minutes so posts never land at the exact cron second.
+          # Combined with hourly crons this gives ~1 hr ± 0–15 min between posts.
+          sleep $((RANDOM % 900))
+
       - name: Run bot
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -53,11 +67,11 @@ jobs:
           INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
           INSTAGRAM_SESSION_B64: ${{ secrets.INSTAGRAM_SESSION_B64 }}
           INSTA_WATERMARK: ${{ secrets.INSTA_WATERMARK }}
-          INSTA_POST_COUNT: ${{ github.event.inputs.count || '3' }}
+          INSTA_POST_COUNT: ${{ github.event.inputs.count || '0' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: |
           python main.py
-      
+
       - name: Upload artifacts (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
@@ -66,13 +80,16 @@ jobs:
           path: |
             output/
             assets/posted_log.json
+            assets/daily_tracker.json
           retention-days: 7
-      
-      - name: Commit posted log
-        if: success()
+
+      - name: Commit state files
+        if: always()
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add assets/posted_log.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update posted log [skip ci]"
+          git add assets/posted_log.json assets/daily_tracker.json \
+                  assets/device.json assets/session.json 2>/dev/null || true
+          git diff --quiet && git diff --staged --quiet || \
+            git commit -m "Update bot state [skip ci]"
           git push
